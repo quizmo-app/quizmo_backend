@@ -23,3 +23,8 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+
+# Runtime data
+data/
+storage/
+*.db
