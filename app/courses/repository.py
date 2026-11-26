@@ -60,6 +60,15 @@ class CourseRepository:
         ).fetchone()
         return _row_to_course(row) if row is not None else None
 
+    def list_courses_for_owner(self, owner_ldap: str) -> list[CourseRecord]:
+        """List the courses of one teacher, oldest first."""
+        rows = self._conn.execute(
+            "SELECT id, title, owner_ldap, is_archived, created_at FROM courses"
+            " WHERE owner_ldap = ? ORDER BY id",
+            (owner_ldap,),
+        ).fetchall()
+        return [_row_to_course(row) for row in rows]
+
     def get_active_version(self, course_id: int) -> VersionRecord | None:
         """Fetch the active version of a course."""
         row = self._conn.execute(

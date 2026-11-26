@@ -11,6 +11,7 @@ _ENV_MAPPING = {
     "QUIZMO_SECRET_KEY": "secret_key",
     "QUIZMO_DATABASE_PATH": "database_path",
     "QUIZMO_STORAGE_DIR": "storage_dir",
+    "QUIZMO_UTILISATEUR_DEV": "utilisateur_dev",
 }
 
 
@@ -25,6 +26,9 @@ class Settings(BaseModel):
     database_path: Path = Path("data/quizmo.db")
     storage_dir: Path = Path("storage")
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",)
+    # Development only: a request with no Authorization header and no session cookie is
+    # treated as this teacher (the front-end does not send a token yet).
+    utilisateur_dev: str | None = None
 
     @classmethod
     def from_env(cls) -> Self:

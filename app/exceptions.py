@@ -206,6 +206,57 @@ class InternalStorageError(AppError):
     """Database or file-system failure (QM-12 E10); the transaction has been rolled back."""
 
 
+class TitleMissingError(AppError):
+    """Course title absent, empty or blank (QM-11)."""
+
+    status_code = 400
+    code = "TITRE_MANQUANT"
+    default_message = "Veuillez saisir le titre du cours."
+
+
+class FileMissingError(AppError):
+    """No PDF file in the upload (QM-11)."""
+
+    status_code = 400
+    code = "FICHIER_MANQUANT"
+    default_message = "Veuillez choisir le fichier PDF du cours."
+
+
+class FileTooLargeError(AppError):
+    """Uploaded file above the size limit (QM-11)."""
+
+    status_code = 413
+    code = "FICHIER_TROP_VOLUMINEUX"
+    default_message = "Le fichier dépasse la taille maximale autorisée."
+
+
+class NotPdfError(AppError):
+    """MIME type or file signature is not PDF (QM-11)."""
+
+    status_code = 415
+    code = "FORMAT_NON_PDF"
+    default_message = "Le fichier doit être au format PDF."
+
+
+class PdfUnreadableError(AppError):
+    """Corrupted or truncated PDF (QM-11)."""
+
+    status_code = 422
+    code = "PDF_ILLISIBLE"
+    default_message = (
+        "Le PDF est illisible (fichier abîmé ou incomplet). "
+        "Réexportez-le depuis le document source, puis réessayez."
+    )
+
+
+class PdfEncryptedError(AppError):
+    """Password-protected PDF (QM-11)."""
+
+    status_code = 422
+    code = "PDF_CHIFFRE"
+    default_message = "Le PDF est protégé par un mot de passe. Fournissez un PDF non protégé."
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     """Install the handlers producing ``{"erreur", "message", "details"?}`` bodies."""
 

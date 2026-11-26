@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from app.auth.router import router as auth_router
 from app.config import Settings
 from app.database import init_db
-from app.errors import ErreurMetier, gerer_erreur
 from app.exceptions import register_exception_handlers
 from app.insertions.router import router as insertions_router
 from app.presentations.router import router as presentations_router
@@ -56,7 +55,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(application)
-    application.add_exception_handler(ErreurMetier, gerer_erreur)
 
     application.include_router(auth_router)
     application.include_router(insertions_router)

@@ -1,18 +1,17 @@
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
+from app.schemas_common import ApiModel
 
 
-class SchemaApi(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+class CoursImporte(ApiModel):
+    """Réponse 201 de l'import (lue par le front : idCours, idVersion, nbPages)."""
 
-
-class CoursImporte(SchemaApi):
     id_cours: int
     id_version: int
     nb_pages: int
 
 
-class CoursResume(SchemaApi):
+class CoursResume(ApiModel):
+    """Une ligne du tableau de bord de l'enseignant."""
+
     id_cours: int
     titre: str
     version: int

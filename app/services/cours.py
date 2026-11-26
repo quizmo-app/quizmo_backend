@@ -1,40 +1,78 @@
-from app.errors import ErreurMetier
-from app.repositories.cours import Cours, CoursRepository, DepotIndisponible
-from app.services import pdf, stockage
+import sqlite3
+
+from app.courses.pdf_storage import PdfStorage
+from app.courses.records import CourseRecord, VersionRecord
+from app.courses.repository import CourseRepository
+from app.database import transaction
+from app.exceptions import (
+    DatabaseUnavailableError,
+    FileMissingError,
+    FileTooLargeError,
+    InternalStorageError,
+    NotPdfError,
+    TitleMissingError,
+)
+from app.services import pdf
 
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # limite encore « à définir » dans le cahier de recette
 
 
+def controler_fichier(contenu: bytes | None, type_mime: str | None) -> list[str]:
+    """Contrôles 3 à 6 de QM-11, dans l'ordre. Renvoie une empreinte par page."""
+    if contenu is None:
+        raise FileMissingError()
+    if len(contenu) > TAILLE_MAX_OCTETS:
+        raise FileTooLargeError(
+            f"Le fichier dépasse la taille maximale autorisée ({TAILLE_MAX_OCTETS // 1024**2} Mo). "
+            "Choisissez un PDF plus léger (compression, découpage)."
+        )
+    if type_mime != "application/pdf" or not pdf.a_la_signature_pdf(contenu):
+        raise NotPdfError()
+    return pdf.calculer_empreintes(contenu)
+
+
 def importer_cours(
-    depot: CoursRepository,
+    connexion: sqlite3.Connection,
+    stockage: PdfStorage,
     proprietaire: str,
     titre: str,
     contenu: bytes | None,
     type_mime: str | None,
-) -> Cours:
-    """Contrôle puis enregistre un cours. L'ordre des contrôles est celui de la spec QM-11."""
+) -> tuple[CourseRecord, VersionRecord]:
+    """Contrôle puis enregistre un cours et sa version 1 : tout ou rien, en base et sur disque."""
     titre = titre.strip()
     if not titre:
-        raise ErreurMetier(400, "TITRE_MANQUANT", "Veuillez saisir le titre du cours.")
-    if contenu is None:
-        raise ErreurMetier(400, "FICHIER_MANQUANT", "Veuillez choisir le fichier PDF du cours.")
-    if len(contenu) > TAILLE_MAX_OCTETS:
-        raise ErreurMetier(
-            413,
-            "FICHIER_TROP_VOLUMINEUX",
-            f"Le fichier dépasse la taille maximale autorisée ({TAILLE_MAX_OCTETS // 1024**2} Mo). "
-            "Choisissez un PDF plus léger (compression, découpage).",
-        )
-    if type_mime != "application/pdf" or not pdf.a_la_signature_pdf(contenu):
-        raise ErreurMetier(415, "FORMAT_NON_PDF", "Le fichier doit être au format PDF.")
-    empreintes = pdf.calculer_empreintes(contenu)
+        raise TitleMissingError()
+    empreintes = controler_fichier(contenu, type_mime)
+    assert contenu is not None
 
-    id_cours = depot.prochain_id()
+    cours: CourseRecord | None = None
     try:
-        stockage.ecrire(id_cours, 1, contenu)
-        return depot.ajouter(id_cours, titre, proprietaire, empreintes)
-    except Exception as erreur:
-        stockage.supprimer(id_cours, 1)
-        if isinstance(erreur, OSError):
-            raise DepotIndisponible() from erreur
+        with transaction(connexion):
+            cours, version = CourseRepository(connexion).create_course_with_v1(
+                titre, proprietaire, len(empreintes), empreintes
+            )
+            stockage.save(cours.id, 1, contenu)
+    except BaseException as erreur:
+        # La transaction est annulée ; le fichier, lui, doit être retiré à la main.
+        if cours is not None:
+            stockage.delete(cours.id, 1)
+        if isinstance(erreur, (InternalStorageError, sqlite3.Error, OSError)):
+            raise DatabaseUnavailableError() from erreur
         raise
+    return cours, version
+
+
+def lister_cours(
+    connexion: sqlite3.Connection, proprietaire: str
+) -> list[tuple[CourseRecord, VersionRecord]]:
+    """Cours de l'enseignant avec leur version active."""
+    depot = CourseRepository(connexion)
+    try:
+        return [
+            (cours, version)
+            for cours in depot.list_courses_for_owner(proprietaire)
+            if (version := depot.get_active_version(cours.id)) is not None
+        ]
+    except sqlite3.Error as erreur:
+        raise DatabaseUnavailableError() from erreur
