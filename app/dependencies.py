@@ -63,11 +63,22 @@ def _extract_token(request: Request) -> str:
     raise AuthenticationError()
 
 
+def _dev_teacher(request: Request, settings: Settings) -> str | None:
+    """Teacher assumed for an anonymous request when ``QUIZMO_UTILISATEUR_DEV`` is set."""
+    has_credentials = "authorization" in request.headers or any(
+        request.cookies.get(name) for name in COOKIE_NAMES
+    )
+    return None if has_credentials else settings.utilisateur_dev
+
+
 def get_current_teacher(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> str:
     """Authenticate the teacher via Bearer header or httpOnly cookie."""
+    dev_teacher = _dev_teacher(request, settings)
+    if dev_teacher:
+        return dev_teacher
     token = _extract_token(request)
     return decode_access_token(token, settings)
 
@@ -77,6 +88,9 @@ def get_current_teacher_qm13(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> str:
     """Authenticate the teacher for QM-13, raising ``SessionExpiredError`` on failure."""
+    dev_teacher = _dev_teacher(request, settings)
+    if dev_teacher:
+        return dev_teacher
     try:
         token = _extract_token(request)
         return decode_access_token(token, settings)

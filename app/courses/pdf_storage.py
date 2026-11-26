@@ -2,6 +2,8 @@
 
 import hashlib
 import os
+import shutil
+from contextlib import suppress
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -74,6 +76,18 @@ class PdfStorage:
         temporary.write_bytes(data)
         os.replace(temporary, path)
         return path
+
+    def delete(self, course_id: int, version_number: int) -> None:
+        """Remove a version file (and a leftover temporary file), then the folder if empty."""
+        path = self.path_for(course_id, version_number)
+        with suppress(OSError):
+            path.unlink(missing_ok=True)
+            path.with_suffix(".tmp").unlink(missing_ok=True)
+            path.parent.rmdir()
+
+    def delete_course(self, course_id: int) -> None:
+        """Remove the folder holding every version of a course."""
+        shutil.rmtree(self._root / str(course_id), ignore_errors=True)
 
     def read_page(self, course_id: int, version_number: int, page_number: int) -> bytes:
         """Return one page as a standalone single-page PDF."""

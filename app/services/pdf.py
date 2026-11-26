@@ -3,7 +3,7 @@ from io import BytesIO
 
 from pypdf import PageObject, PdfReader, PdfWriter
 
-from app.errors import ErreurMetier
+from app.exceptions import PdfEncryptedError, PdfUnreadableError
 
 SIGNATURE = b"%PDF"
 # La marque de fin doit se trouver dans les derniers octets. pypdf se contente de n'importe quel
@@ -13,13 +13,14 @@ ZONE_FIN = 1024
 
 
 def a_la_signature_pdf(contenu: bytes) -> bool:
+    """Les premiers octets sont ceux d'un PDF, quelle que soit l'extension."""
     return contenu.startswith(SIGNATURE)
 
 
 def calculer_empreintes(contenu: bytes) -> list[str]:
     """Une empreinte SHA-256 par page. Refuse un PDF illisible ou chiffré."""
     if MARQUE_FIN not in contenu[-ZONE_FIN:]:
-        raise _illisible()
+        raise PdfUnreadableError()
     try:
         lecteur = PdfReader(BytesIO(contenu))
         chiffre = lecteur.is_encrypted
@@ -27,15 +28,11 @@ def calculer_empreintes(contenu: bytes) -> list[str]:
         # pypdf répare un PDF abîmé en omettant les pages perdues : on compare au nombre annoncé.
         complet = chiffre or len(empreintes) == lecteur.root_object["/Pages"]["/Count"]
     except Exception as erreur:  # un PDF abîmé fait lever à pypdf des exceptions très variées
-        raise _illisible() from erreur
+        raise PdfUnreadableError() from erreur
     if chiffre:
-        raise ErreurMetier(
-            422,
-            "PDF_CHIFFRE",
-            "Le PDF est protégé par un mot de passe. Fournissez un PDF non protégé.",
-        )
+        raise PdfEncryptedError()
     if not empreintes or not complet:
-        raise _illisible()
+        raise PdfUnreadableError()
     return empreintes
 
 
@@ -47,12 +44,3 @@ def _empreinte(page: PageObject) -> str:
     tampon = BytesIO()
     redacteur.write(tampon)
     return hashlib.sha256(tampon.getvalue()).hexdigest()
-
-
-def _illisible() -> ErreurMetier:
-    return ErreurMetier(
-        422,
-        "PDF_ILLISIBLE",
-        "Le PDF est illisible (fichier abîmé ou incomplet). "
-        "Réexportez-le depuis le document source, puis réessayez.",
-    )

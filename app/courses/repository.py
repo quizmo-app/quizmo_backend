@@ -60,6 +60,22 @@ class CourseRepository:
         ).fetchone()
         return _row_to_course(row) if row is not None else None
 
+    def list_courses_for_owner(self, owner_ldap: str) -> list[CourseRecord]:
+        """List the courses of one teacher, oldest first."""
+        rows = self._conn.execute(
+            "SELECT id, title, owner_ldap, is_archived, created_at FROM courses"
+            " WHERE owner_ldap = ? ORDER BY id",
+            (owner_ldap,),
+        ).fetchall()
+        return [_row_to_course(row) for row in rows]
+
+    def count_quizzes(self, course_id: int) -> int:
+        """Number of quizzes attached to a course."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total FROM quizzes WHERE course_id = ?", (course_id,)
+        ).fetchone()
+        return int(row["total"])
+
     def get_active_version(self, course_id: int) -> VersionRecord | None:
         """Fetch the active version of a course."""
         row = self._conn.execute(
@@ -206,6 +222,25 @@ class CourseRepository:
             ),
         )
         return inserted_id(cursor), ordre
+
+    def move_insertion(
+        self, insertion_id: int, version_id: int, after_page: int, page_fingerprint: str
+    ) -> None:
+        """Move an insertion after another page of its version, last in that page's ``ordre``."""
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(ordre), 0) AS max_ordre"
+            " FROM insertions WHERE id_version = ? AND apres_page = ?",
+            (version_id, after_page),
+        ).fetchone()
+        self._conn.execute(
+            "UPDATE insertions SET apres_page = ?, ordre = ?, empreinte = ? WHERE id = ?",
+            (after_page, int(row["max_ordre"]) + 1, page_fingerprint, insertion_id),
+        )
+
+    def delete_course(self, course_id: int) -> None:
+        """Delete a course; ON DELETE CASCADE removes its versions, quizzes, questions,
+        leaderboards, insertions and presentations."""
+        self._conn.execute("DELETE FROM courses WHERE id = ?", (course_id,))
 
     def create_leaderboard(self, course_id: int, title: str) -> int:
         """Insert a new leaderboard record and return its primary key."""
