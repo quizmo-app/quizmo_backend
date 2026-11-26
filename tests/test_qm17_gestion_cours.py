@@ -377,3 +377,156 @@ def test_version_sans_jeton_et_cours_inexistant(
     pdf = make_pdf_bytes(12)
     verifier_erreur(envoyer_version(client, jeu["bdd"], pdf, None), 401, "NON_AUTHENTIFIE")
     verifier_erreur(envoyer_version(client, 999999, pdf, headers_a), 404, "COURS_INTROUVABLE")
+
+
+# --- PUT /api/cours/{id}/structure --------------------------------------------------------
+
+
+def ids_insertions(client: TestClient, id_cours: int, headers: dict[str, str]) -> list[int]:
+    """Identifiants des insertions de la version courante, dans l'ordre du déroulé."""
+    reponse = client.get(f"/api/cours/{id_cours}", headers=headers)
+    return [i["idInsertion"] for i in reponse.json()["insertions"]]
+
+
+def structurer(
+    client: TestClient, id_cours: int, positions_: list[dict[str, Any]], headers: Any
+) -> Any:
+    """Envoie PUT /api/cours/{id}/structure."""
+    return client.put(f"/api/cours/{id_cours}/structure", json=positions_, headers=headers)
+
+
+def test_t09_ajuster_la_structure(
+    client: TestClient, jeu: dict[str, int], headers_a: dict[str, str]
+) -> None:
+    _, id_l1, _ = ids_insertions(client, jeu["bdd"], headers_a)
+
+    reponse = structurer(client, jeu["bdd"], [{"idInsertion": id_l1, "apresPage": 5}], headers_a)
+
+    assert reponse.status_code == 200, reponse.text
+    attendu = [("QUIZ", 4), ("LEADERBOARD", 5), ("QUIZ", 9)]
+    assert [(i["type"], i["apresPage"]) for i in reponse.json()["insertions"]] == attendu
+    relu = client.get(f"/api/cours/{jeu['bdd']}", headers=headers_a).json()
+    assert [(i["type"], i["apresPage"]) for i in relu["insertions"]] == attendu
+
+
+def test_structure_plusieurs_deplacements_et_echange(
+    client: TestClient, jeu: dict[str, int], headers_a: dict[str, str], db: sqlite3.Connection
+) -> None:
+    id_q1, id_l1, id_q2 = ids_insertions(client, jeu["bdd"], headers_a)
+
+    reponse = structurer(
+        client,
+        jeu["bdd"],
+        [
+            {"idInsertion": id_q1, "apresPage": 8},
+            {"idInsertion": id_l1, "apresPage": 4},
+            {"idInsertion": id_q2, "apresPage": 8},
+        ],
+        headers_a,
+    )
+
+    assert reponse.status_code == 200, reponse.text
+    corps = reponse.json()["insertions"]
+    assert [(i["idInsertion"], i["apresPage"]) for i in corps] == [
+        (id_l1, 4),
+        (id_q1, 8),
+        (id_q2, 8),
+    ]
+    depot = CourseRepository(db)
+    version = depot.get_active_version(jeu["bdd"])
+    assert version is not None
+    for insertion in depot.list_insertions_for_version(version.id):
+        assert insertion.page_fingerprint == version.page_fingerprints[insertion.after_page - 1]
+
+
+@pytest.mark.parametrize("page", [99, 0, 11, -1])
+def test_t10_position_hors_du_cours(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+    page: int,
+) -> None:
+    id_q1, id_l1, _ = ids_insertions(client, jeu["bdd"], headers_a)
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+
+    # Le premier déplacement est valide : il ne doit pas être appliqué non plus.
+    reponse = structurer(
+        client,
+        jeu["bdd"],
+        [{"idInsertion": id_q1, "apresPage": 2}, {"idInsertion": id_l1, "apresPage": page}],
+        headers_a,
+    )
+
+    verifier_erreur(reponse, 422, "POSITION_INVALIDE")
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_structure_insertion_d_un_autre_cours_ou_en_double(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+    add_quiz: Callable[..., dict[str, Any]],
+) -> None:
+    id_autre = add_quiz(headers_a, jeu["reseaux"], 2)["insertion"]["idInsertion"]
+    id_q1 = ids_insertions(client, jeu["bdd"], headers_a)[0]
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+
+    autre = structurer(client, jeu["bdd"], [{"idInsertion": id_autre, "apresPage": 2}], headers_a)
+    double = structurer(
+        client,
+        jeu["bdd"],
+        [{"idInsertion": id_q1, "apresPage": 2}, {"idInsertion": id_q1, "apresPage": 3}],
+        headers_a,
+    )
+    invalide = structurer(client, jeu["bdd"], [{"idInsertion": id_q1}], headers_a)
+
+    verifier_erreur(autre, 404, "RESSOURCE_INTROUVABLE")
+    verifier_erreur(double, 422, "POSITION_INVALIDE")
+    verifier_erreur(invalide, 400, "VALIDATION")
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_t21_structure_du_cours_d_un_autre_enseignant(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    headers_b: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+) -> None:
+    id_l1 = ids_insertions(client, jeu["bdd"], headers_a)[1]
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+
+    reponse = structurer(client, jeu["bdd"], [{"idInsertion": id_l1, "apresPage": 5}], headers_b)
+
+    verifier_erreur(reponse, 403, "ACCES_REFUSE")
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_t13_structure_pendant_une_seance(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+) -> None:
+    id_l1 = ids_insertions(client, jeu["bdd"], headers_a)[1]
+    demarrer_presentation(client, jeu["bdd"], headers_a)
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+
+    reponse = structurer(client, jeu["bdd"], [{"idInsertion": id_l1, "apresPage": 5}], headers_a)
+
+    verifier_erreur(reponse, 409, "COURS_VERROUILLE")
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_structure_sans_jeton_et_cours_inexistant(
+    client: TestClient, jeu: dict[str, int], headers_a: dict[str, str]
+) -> None:
+    corps = [{"idInsertion": 1, "apresPage": 5}]
+    verifier_erreur(structurer(client, jeu["bdd"], corps, None), 401, "NON_AUTHENTIFIE")
+    verifier_erreur(structurer(client, 999999, corps, headers_a), 404, "COURS_INTROUVABLE")

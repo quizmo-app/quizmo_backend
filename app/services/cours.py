@@ -14,11 +14,20 @@ from app.exceptions import (
     FileMissingError,
     FileTooLargeError,
     InternalStorageError,
+    InvalidPositionError,
     NotPdfError,
+    ResourceMissingError,
     TitleMissingError,
 )
 from app.presentations.repository import PresentationRepository
-from app.schemas import Alerte, CoursDetail, CoursResume, InsertionCours, NouvelleVersion
+from app.schemas import (
+    Alerte,
+    CoursDetail,
+    CoursResume,
+    InsertionCours,
+    NouvelleVersion,
+    PositionInsertion,
+)
 from app.services import pdf
 
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # limite encore « à définir » dans le cahier de recette
@@ -236,3 +245,48 @@ def nouvelle_version(
         version = depot.get_active_version(id_cours)
         assert version is not None
         return NouvelleVersion(**_detail(depot, cours, version).model_dump(), alertes=alertes)
+
+
+def modifier_structure(
+    connexion: sqlite3.Connection,
+    enseignant: str,
+    id_cours: int,
+    positions: list[PositionInsertion],
+) -> CoursDetail:
+    """Déplace des insertions de la version courante. Tout est vérifié avant d'écrire."""
+    depot = CourseRepository(connexion)
+    with _base_disponible():
+        cours, version = _cours_de(depot, enseignant, id_cours)
+        _verifier_hors_seance(connexion, id_cours)
+        insertions = depot.list_insertions_for_version(version.id)
+        pages_actuelles = {insertion.id: insertion.after_page for insertion in insertions}
+
+    vus: set[int] = set()
+    for position in positions:
+        if position.id_insertion not in pages_actuelles:
+            raise ResourceMissingError(
+                "Cet emplacement n'existe pas dans la version courante du cours."
+            )
+        if position.id_insertion in vus:
+            raise InvalidPositionError("Un même emplacement ne peut être placé qu'une fois.")
+        if not 1 <= position.apres_page <= version.page_count:
+            raise InvalidPositionError(
+                f"La position doit être comprise entre 1 et {version.page_count}"
+                " (nombre de pages du cours)."
+            )
+        vus.add(position.id_insertion)
+
+    try:
+        with transaction(connexion):
+            for position in positions:
+                if position.apres_page != pages_actuelles[position.id_insertion]:
+                    depot.move_insertion(
+                        position.id_insertion,
+                        version.id,
+                        position.apres_page,
+                        version.page_fingerprints[position.apres_page - 1],
+                    )
+    except InternalStorageError as erreur:
+        raise DatabaseUnavailableError() from erreur
+    with _base_disponible():
+        return _detail(depot, cours, version)

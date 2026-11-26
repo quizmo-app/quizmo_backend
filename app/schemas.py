@@ -58,3 +58,10 @@ class NouvelleVersion(CoursDetail):
     """Réponse de POST /api/cours/{id}/versions."""
 
     alertes: list[Alerte]
+
+
+class PositionInsertion(ApiModel):
+    """Un élément du corps de PUT /api/cours/{id}/structure."""
+
+    id_insertion: int
+    apres_page: int

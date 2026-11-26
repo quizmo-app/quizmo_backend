@@ -223,6 +223,20 @@ class CourseRepository:
         )
         return inserted_id(cursor), ordre
 
+    def move_insertion(
+        self, insertion_id: int, version_id: int, after_page: int, page_fingerprint: str
+    ) -> None:
+        """Move an insertion after another page of its version, last in that page's ``ordre``."""
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(ordre), 0) AS max_ordre"
+            " FROM insertions WHERE id_version = ? AND apres_page = ?",
+            (version_id, after_page),
+        ).fetchone()
+        self._conn.execute(
+            "UPDATE insertions SET apres_page = ?, ordre = ?, empreinte = ? WHERE id = ?",
+            (after_page, int(row["max_ordre"]) + 1, page_fingerprint, insertion_id),
+        )
+
     def create_leaderboard(self, course_id: int, title: str) -> int:
         """Insert a new leaderboard record and return its primary key."""
         cursor = self._conn.execute(

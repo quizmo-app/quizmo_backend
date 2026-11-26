@@ -3,7 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, UploadFile
 
 from app.dependencies import InsertionsDbDep, PdfStorageDep, TeacherDep
-from app.schemas import CoursDetail, CoursImporte, CoursResume, NouvelleVersion
+from app.schemas import (
+    CoursDetail,
+    CoursImporte,
+    CoursResume,
+    NouvelleVersion,
+    PositionInsertion,
+)
 from app.services import cours as service_cours
 
 router = APIRouter(prefix="/api/cours", tags=["cours"])
@@ -55,3 +61,11 @@ def nouvelle_version(
     return service_cours.nouvelle_version(
         db, stockage, enseignant, id_cours, contenu, fichier.content_type if fichier else None
     )
+
+
+@router.put("/{id_cours}/structure")
+def modifier_structure(
+    id_cours: int, positions: list[PositionInsertion], enseignant: TeacherDep, db: Db
+) -> CoursDetail:
+    """Enregistrer la position des quiz et leaderboards : ``[{idInsertion, apresPage}]`` (QM-17)."""
+    return service_cours.modifier_structure(db, enseignant, id_cours, positions)

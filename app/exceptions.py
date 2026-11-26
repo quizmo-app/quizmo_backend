@@ -88,6 +88,14 @@ class InvalidPageError(AppError):
     default_action = "Choisir une page du cours"
 
 
+class InvalidPositionError(AppError):
+    """Structure update with ``apresPage`` outside 1..page_count (QM-17 T10)."""
+
+    status_code = 422
+    code = "POSITION_INVALIDE"
+    default_message = "La position doit être comprise entre 1 et le nombre de pages du cours."
+
+
 class InvalidQuizForInsertionError(AppError):
     """Quiz has no question or belongs to another course (QM-13 CA5)."""
 
