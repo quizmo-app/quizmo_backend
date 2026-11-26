@@ -10,10 +10,12 @@ from pydantic import BaseModel
 from app.auth.router import router as auth_router
 from app.config import Settings
 from app.database import init_db
+from app.errors import ErreurMetier, gerer_erreur
 from app.exceptions import register_exception_handlers
 from app.insertions.router import router as insertions_router
 from app.presentations.router import router as presentations_router
 from app.quizzes.router import router as quizzes_router
+from app.routers import cours
 
 
 class MessageResponse(BaseModel):
@@ -54,12 +56,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(application)
+    application.add_exception_handler(ErreurMetier, gerer_erreur)
 
     application.include_router(auth_router)
     application.include_router(insertions_router)
     application.include_router(quizzes_router)
     application.include_router(presentations_router, prefix="/cours")
     application.include_router(presentations_router, prefix="/api/cours")
+    application.include_router(cours.router)
 
     @application.get("/", response_model=MessageResponse, tags=["root"])
     async def read_root() -> MessageResponse:
