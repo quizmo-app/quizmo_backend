@@ -40,3 +40,21 @@ class CoursDetail(ApiModel):
     id_version: int
     nb_pages: int
     insertions: list[InsertionCours]
+
+
+class Alerte(ApiModel):
+    """Insertion déplacée sur la dernière page : la nouvelle version a moins de pages."""
+
+    id_insertion: int
+    type: str
+    id_quiz: int | None = None
+    id_leaderboard: int | None = None
+    titre: str
+    apres_page_avant: int
+    apres_page: int
+
+
+class NouvelleVersion(CoursDetail):
+    """Réponse de POST /api/cours/{id}/versions."""
+
+    alertes: list[Alerte]

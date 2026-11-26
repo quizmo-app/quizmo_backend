@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, UploadFile
 
 from app.dependencies import InsertionsDbDep, PdfStorageDep, TeacherDep
-from app.schemas import CoursDetail, CoursImporte, CoursResume
+from app.schemas import CoursDetail, CoursImporte, CoursResume, NouvelleVersion
 from app.services import cours as service_cours
 
 router = APIRouter(prefix="/api/cours", tags=["cours"])
@@ -40,3 +40,18 @@ def lister_cours(enseignant: TeacherDep, db: Db) -> list[CoursResume]:
 def consulter_cours(id_cours: int, enseignant: TeacherDep, db: Db) -> CoursDetail:
     """Ouvrir un cours : version courante, quiz et leaderboards insérés (QM-17)."""
     return service_cours.consulter_cours(db, enseignant, id_cours)
+
+
+@router.post("/{id_cours}/versions")
+def nouvelle_version(
+    id_cours: int,
+    enseignant: TeacherDep,
+    db: Db,
+    stockage: PdfStorageDep,
+    fichier: Annotated[UploadFile, File()] = None,
+) -> NouvelleVersion:
+    """Mettre à jour le PDF d'un cours : nouvelle version, insertions reportées (QM-17)."""
+    contenu = fichier.file.read(service_cours.TAILLE_MAX_OCTETS + 1) if fichier else None
+    return service_cours.nouvelle_version(
+        db, stockage, enseignant, id_cours, contenu, fichier.content_type if fichier else None
+    )

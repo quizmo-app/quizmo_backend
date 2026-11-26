@@ -193,6 +193,15 @@ class PresentationStateError(ConflictError):
     default_message = "Action impossible dans l'état actuel de la présentation"
 
 
+class CourseLockedError(ConflictError):
+    """Course being presented: it cannot be updated or deleted (QM-17 T13)."""
+
+    code = "COURS_VERROUILLE"
+    default_message = (
+        "Ce cours est en cours de présentation. Terminez la séance avant de le modifier."
+    )
+
+
 class DatabaseUnavailableError(AppError):
     """Database connection or transaction unavailable (QM-13 CA8)."""
 
