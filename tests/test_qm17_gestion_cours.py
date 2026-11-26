@@ -161,7 +161,15 @@ def etat(
     reponse = client.get(f"/api/cours/{id_cours}", headers=headers)
     tables = {
         table: db.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
-        for table in ("courses", "course_versions", "insertions", "quizzes", "leaderboards")
+        for table in (
+            "courses",
+            "course_versions",
+            "insertions",
+            "quizzes",
+            "questions",
+            "leaderboards",
+            "presentations",
+        )
     }
     fichiers = sorted(str(f) for f in settings.storage_dir.rglob("*"))
     return reponse.json(), {k: [tuple(r) for r in v] for k, v in tables.items()}, fichiers
@@ -200,6 +208,7 @@ def test_t07_ancienne_version_archivee(
 
     reponse = envoyer_version(client, jeu["bdd"], make_pdf_bytes(12), headers_a)
 
+    assert reponse.status_code == 200, reponse.text
     assert reponse.json()["idCours"] == jeu["bdd"]
     versions = db.execute(
         "SELECT version_number, is_active FROM course_versions WHERE course_id = ?"
@@ -678,3 +687,26 @@ def test_suppression_sans_jeton_et_cours_inexistant(
 ) -> None:
     verifier_erreur(client.delete(f"/api/cours/{jeu['bdd']}"), 401, "NON_AUTHENTIFIE")
     verifier_erreur(client.delete("/api/cours/999999", headers=headers_a), 404, "COURS_INTROUVABLE")
+
+
+# --- Ordre des contrôles : 401 → 404 → 403 → 409 avant la validation du corps -------------
+
+
+def test_corps_invalide_controle_apres_le_cours(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    headers_b: dict[str, str],
+) -> None:
+    invalide = [{"idInsertion": "x"}]
+    texte = {"fichier": "du texte"}
+
+    verifier_erreur(structurer(client, 999999, invalide, headers_a), 404, "COURS_INTROUVABLE")
+    verifier_erreur(structurer(client, jeu["bdd"], invalide, headers_b), 403, "ACCES_REFUSE")
+    reponse = client.post(f"/api/cours/{jeu['bdd']}/versions", data=texte, headers=headers_b)
+    verifier_erreur(reponse, 403, "ACCES_REFUSE")
+
+    demarrer_presentation(client, jeu["bdd"], headers_a)
+    verifier_erreur(structurer(client, jeu["bdd"], invalide, headers_a), 409, "COURS_VERROUILLE")
+    reponse = client.post(f"/api/cours/{jeu['bdd']}/versions", data=texte, headers=headers_a)
+    verifier_erreur(reponse, 409, "COURS_VERROUILLE")

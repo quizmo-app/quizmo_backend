@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 
 from app.dependencies import InsertionsDbDep, PdfStorageDep, TeacherDep
 from app.schemas import (
@@ -16,6 +16,14 @@ router = APIRouter(prefix="/api/cours", tags=["cours"])
 
 # Connexion SQLite dont l'échec à l'ouverture devient un 503 BDD_INDISPONIBLE.
 Db = InsertionsDbDep
+
+
+def cours_modifiable(id_cours: int, enseignant: TeacherDep, db: Db) -> None:
+    """401, 404, 403 puis 409 : en dépendance, donc avant la validation du corps (400)."""
+    service_cours.verifier_cours_modifiable(db, enseignant, id_cours)
+
+
+COURS_MODIFIABLE = Depends(cours_modifiable)
 
 
 @router.post("", status_code=201)
@@ -48,7 +56,7 @@ def consulter_cours(id_cours: int, enseignant: TeacherDep, db: Db) -> CoursDetai
     return service_cours.consulter_cours(db, enseignant, id_cours)
 
 
-@router.post("/{id_cours}/versions")
+@router.post("/{id_cours}/versions", dependencies=[COURS_MODIFIABLE])
 def nouvelle_version(
     id_cours: int,
     enseignant: TeacherDep,
@@ -63,7 +71,7 @@ def nouvelle_version(
     )
 
 
-@router.put("/{id_cours}/structure")
+@router.put("/{id_cours}/structure", dependencies=[COURS_MODIFIABLE])
 def modifier_structure(
     id_cours: int, positions: list[PositionInsertion], enseignant: TeacherDep, db: Db
 ) -> CoursDetail:
@@ -71,7 +79,7 @@ def modifier_structure(
     return service_cours.modifier_structure(db, enseignant, id_cours, positions)
 
 
-@router.delete("/{id_cours}", status_code=204)
+@router.delete("/{id_cours}", status_code=204, dependencies=[COURS_MODIFIABLE])
 def supprimer_cours(
     id_cours: int, enseignant: TeacherDep, db: Db, stockage: PdfStorageDep
 ) -> Response:

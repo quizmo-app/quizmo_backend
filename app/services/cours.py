@@ -63,6 +63,15 @@ def _verifier_hors_seance(connexion: sqlite3.Connection, id_cours: int) -> None:
         raise CourseLockedError()
 
 
+def verifier_cours_modifiable(
+    connexion: sqlite3.Connection, enseignant: str, id_cours: int
+) -> None:
+    """Contrôles avant toute modification : 404, 403 puis 409 (cours en séance)."""
+    with _base_disponible():
+        _cours_de(CourseRepository(connexion), enseignant, id_cours)
+        _verifier_hors_seance(connexion, id_cours)
+
+
 def _ecrire_tout_ou_rien(
     connexion: sqlite3.Connection,
     stockage: PdfStorage,
@@ -223,9 +232,9 @@ def nouvelle_version(
 ) -> NouvelleVersion:
     """Archive la version courante et en crée une nouvelle avec les mêmes insertions."""
     depot = CourseRepository(connexion)
+    verifier_cours_modifiable(connexion, enseignant, id_cours)
     with _base_disponible():
         cours, _ = _cours_de(depot, enseignant, id_cours)
-        _verifier_hors_seance(connexion, id_cours)
     empreintes = controler_fichier(contenu, type_mime)
     assert contenu is not None
 
@@ -255,9 +264,9 @@ def modifier_structure(
 ) -> CoursDetail:
     """Déplace des insertions de la version courante. Tout est vérifié avant d'écrire."""
     depot = CourseRepository(connexion)
+    verifier_cours_modifiable(connexion, enseignant, id_cours)
     with _base_disponible():
         cours, version = _cours_de(depot, enseignant, id_cours)
-        _verifier_hors_seance(connexion, id_cours)
         insertions = depot.list_insertions_for_version(version.id)
         pages_actuelles = {insertion.id: insertion.after_page for insertion in insertions}
 
@@ -297,9 +306,7 @@ def supprimer_cours(
 ) -> None:
     """Supprime le cours et tout ce qui en dépend, en base puis sur le disque."""
     depot = CourseRepository(connexion)
-    with _base_disponible():
-        _cours_de(depot, enseignant, id_cours)
-        _verifier_hors_seance(connexion, id_cours)
+    verifier_cours_modifiable(connexion, enseignant, id_cours)
     try:
         with transaction(connexion):
             depot.delete_course(id_cours)
