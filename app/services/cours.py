@@ -290,3 +290,20 @@ def modifier_structure(
         raise DatabaseUnavailableError() from erreur
     with _base_disponible():
         return _detail(depot, cours, version)
+
+
+def supprimer_cours(
+    connexion: sqlite3.Connection, stockage: PdfStorage, enseignant: str, id_cours: int
+) -> None:
+    """Supprime le cours et tout ce qui en dépend, en base puis sur le disque."""
+    depot = CourseRepository(connexion)
+    with _base_disponible():
+        _cours_de(depot, enseignant, id_cours)
+        _verifier_hors_seance(connexion, id_cours)
+    try:
+        with transaction(connexion):
+            depot.delete_course(id_cours)
+    except InternalStorageError as erreur:
+        raise DatabaseUnavailableError() from erreur
+    # Après le COMMIT seulement : si la base échoue, les PDF du cours restent intacts.
+    stockage.delete_course(id_cours)

@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import shutil
 from contextlib import suppress
 from dataclasses import dataclass
 from io import BytesIO
@@ -83,6 +84,10 @@ class PdfStorage:
             path.unlink(missing_ok=True)
             path.with_suffix(".tmp").unlink(missing_ok=True)
             path.parent.rmdir()
+
+    def delete_course(self, course_id: int) -> None:
+        """Remove the folder holding every version of a course."""
+        shutil.rmtree(self._root / str(course_id), ignore_errors=True)
 
     def read_page(self, course_id: int, version_number: int, page_number: int) -> bytes:
         """Return one page as a standalone single-page PDF."""

@@ -237,6 +237,11 @@ class CourseRepository:
             (after_page, int(row["max_ordre"]) + 1, page_fingerprint, insertion_id),
         )
 
+    def delete_course(self, course_id: int) -> None:
+        """Delete a course; ON DELETE CASCADE removes its versions, quizzes, questions,
+        leaderboards, insertions and presentations."""
+        self._conn.execute("DELETE FROM courses WHERE id = ?", (course_id,))
+
     def create_leaderboard(self, course_id: int, title: str) -> int:
         """Insert a new leaderboard record and return its primary key."""
         cursor = self._conn.execute(

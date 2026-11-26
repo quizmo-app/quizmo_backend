@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.courses.records import CourseRecord, VersionRecord
 from app.courses.repository import CourseRepository
-from app.database import transaction
+from app.database import connect, transaction
 from app.services import cours as service_cours
 from tests.conftest import TEACHER_A, TEACHER_B
 from tests.helpers import make_pdf_bytes
@@ -530,3 +530,151 @@ def test_structure_sans_jeton_et_cours_inexistant(
     corps = [{"idInsertion": 1, "apresPage": 5}]
     verifier_erreur(structurer(client, jeu["bdd"], corps, None), 401, "NON_AUTHENTIFIE")
     verifier_erreur(structurer(client, 999999, corps, headers_a), 404, "COURS_INTROUVABLE")
+
+
+# --- DELETE /api/cours/{id} ---------------------------------------------------------------
+
+
+def tables(db: sqlite3.Connection) -> list[str]:
+    """Toutes les tables du schéma (hors table interne de SQLite)."""
+    lignes = db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    return [ligne["name"] for ligne in lignes]
+
+
+def test_t15_supprimer_un_cours(
+    client: TestClient, jeu: dict[str, int], headers_a: dict[str, str], settings: Settings
+) -> None:
+    assert (settings.storage_dir / str(jeu["reseaux"]) / "v1.pdf").is_file()
+
+    reponse = client.delete(f"/api/cours/{jeu['reseaux']}", headers=headers_a)
+
+    assert reponse.status_code == 204
+    assert not reponse.content
+    titres = [c["titre"] for c in client.get("/api/cours", headers=headers_a).json()]
+    assert titres == ["Bases de données"]
+    assert not (settings.storage_dir / str(jeu["reseaux"])).exists()
+    assert (settings.storage_dir / str(jeu["bdd"]) / "v1.pdf").is_file()
+    verifier_erreur(
+        client.get(f"/api/cours/{jeu['reseaux']}", headers=headers_a), 404, "COURS_INTROUVABLE"
+    )
+
+
+def test_t16_supprimer_un_cours_deja_joue(
+    client: TestClient,
+    seed_course: SeedCourse,
+    add_quiz: Callable[..., dict[str, Any]],
+    add_leaderboard: Callable[..., dict[str, int]],
+    headers_a: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+) -> None:
+    # Seul cours de la base : après suppression, aucune table ne doit garder de ligne.
+    cours, _ = seed_course(TEACHER_A, "Bases de données", 10)
+    add_quiz(headers_a, cours.id, 4)
+    add_leaderboard(cours.id, 8)
+    assert envoyer_version(client, cours.id, make_pdf_bytes(6), headers_a).status_code == 200
+    demarrer_presentation(client, cours.id, headers_a)
+    termine = client.post(f"/api/cours/{cours.id}/presentation/terminer", headers=headers_a)
+    assert termine.status_code == 200, termine.text
+    remplies = [t for t in tables(db) if db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]]
+    assert len(remplies) == len(tables(db))  # le jeu de données remplit toutes les tables
+
+    reponse = client.delete(f"/api/cours/{cours.id}", headers=headers_a)
+
+    assert reponse.status_code == 204
+    restes = {t: db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables(db)}
+    assert restes == dict.fromkeys(tables(db), 0)
+    assert not (settings.storage_dir / str(cours.id)).exists()
+
+
+@pytest.mark.usefixtures("client")
+def test_suppression_s_appuie_sur_les_cles_etrangeres(settings: Settings) -> None:
+    # La suppression repose sur ON DELETE CASCADE : chaque connexion de l'appli doit l'activer.
+    connexion = connect(settings.database_path)
+    try:
+        assert connexion.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    finally:
+        connexion.close()
+
+
+def test_suppression_laisse_les_autres_cours_intacts(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    headers_b: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+) -> None:
+    reseaux = etat(client, db, settings, jeu["reseaux"], headers_a)[0]
+    algo = etat(client, db, settings, jeu["algo"], headers_b)[0]
+
+    assert client.delete(f"/api/cours/{jeu['bdd']}", headers=headers_a).status_code == 204
+
+    assert etat(client, db, settings, jeu["reseaux"], headers_a)[0] == reseaux
+    assert etat(client, db, settings, jeu["algo"], headers_b)[0] == algo
+    lignes = db.execute(
+        "SELECT COUNT(*) FROM insertions WHERE course_id = ?", (jeu["bdd"],)
+    ).fetchone()[0]
+    assert lignes == 0
+
+
+def test_t19_supprimer_le_cours_d_un_autre_enseignant(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    headers_b: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+) -> None:
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+    reponse = client.delete(f"/api/cours/{jeu['bdd']}", headers=headers_b)
+
+    verifier_erreur(reponse, 403, "ACCES_REFUSE")
+
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_t13_suppression_pendant_une_seance(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+) -> None:
+    demarrer_presentation(client, jeu["bdd"], headers_a)
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+
+    reponse = client.delete(f"/api/cours/{jeu['bdd']}", headers=headers_a)
+
+    verifier_erreur(reponse, 409, "COURS_VERROUILLE")
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_suppression_bdd_en_panne(
+    client: TestClient,
+    jeu: dict[str, int],
+    headers_a: dict[str, str],
+    db: sqlite3.Connection,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    avant = etat(client, db, settings, jeu["bdd"], headers_a)
+
+    def panne(*_args: object) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(CourseRepository, "delete_course", panne)
+
+    reponse = client.delete(f"/api/cours/{jeu['bdd']}", headers=headers_a)
+
+    verifier_erreur(reponse, 503, "BDD_INDISPONIBLE")
+    assert etat(client, db, settings, jeu["bdd"], headers_a) == avant
+
+
+def test_suppression_sans_jeton_et_cours_inexistant(
+    client: TestClient, jeu: dict[str, int], headers_a: dict[str, str]
+) -> None:
+    verifier_erreur(client.delete(f"/api/cours/{jeu['bdd']}"), 401, "NON_AUTHENTIFIE")
+    verifier_erreur(client.delete("/api/cours/999999", headers=headers_a), 404, "COURS_INTROUVABLE")

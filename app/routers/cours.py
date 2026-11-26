@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile
 
 from app.dependencies import InsertionsDbDep, PdfStorageDep, TeacherDep
 from app.schemas import (
@@ -69,3 +69,12 @@ def modifier_structure(
 ) -> CoursDetail:
     """Enregistrer la position des quiz et leaderboards : ``[{idInsertion, apresPage}]`` (QM-17)."""
     return service_cours.modifier_structure(db, enseignant, id_cours, positions)
+
+
+@router.delete("/{id_cours}", status_code=204)
+def supprimer_cours(
+    id_cours: int, enseignant: TeacherDep, db: Db, stockage: PdfStorageDep
+) -> Response:
+    """Supprimer un cours, ses versions, quiz, leaderboards, insertions et séances (QM-17)."""
+    service_cours.supprimer_cours(db, stockage, enseignant, id_cours)
+    return Response(status_code=204)
