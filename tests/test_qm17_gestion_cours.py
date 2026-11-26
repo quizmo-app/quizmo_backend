@@ -77,3 +77,49 @@ def test_t02_cloisonnement(
 @pytest.mark.usefixtures("jeu")
 def test_t18_liste_sans_jeton(client: TestClient) -> None:
     verifier_erreur(client.get("/api/cours"), 401, "NON_AUTHENTIFIE")
+
+
+# --- GET /api/cours/{id} ------------------------------------------------------------------
+
+
+def positions(client: TestClient, id_cours: int, headers: dict[str, str]) -> dict[str, int]:
+    """Titre de chaque quiz / leaderboard → page après laquelle il apparaît."""
+    reponse = client.get(f"/api/cours/{id_cours}", headers=headers)
+    assert reponse.status_code == 200, reponse.text
+    return {i["titre"]: i["apresPage"] for i in reponse.json()["insertions"]}
+
+
+def test_t05_ouvrir_un_cours(
+    client: TestClient, jeu: dict[str, int], headers_a: dict[str, str]
+) -> None:
+    reponse = client.get(f"/api/cours/{jeu['bdd']}", headers=headers_a)
+
+    assert reponse.status_code == 200
+    corps = reponse.json()
+    assert {k: corps[k] for k in ("idCours", "titre", "version", "nbPages")} == {
+        "idCours": jeu["bdd"],
+        "titre": "Bases de données",
+        "version": 1,
+        "nbPages": 10,
+    }
+    assert [(i["type"], i["apresPage"]) for i in corps["insertions"]] == [
+        ("QUIZ", 4),
+        ("LEADERBOARD", 8),
+        ("QUIZ", 9),
+    ]
+    assert [i["idQuiz"] for i in corps["insertions"]] == [jeu["q1"], None, jeu["q2"]]
+    assert corps["insertions"][1]["idLeaderboard"] == jeu["l1"]
+
+
+def test_t17_ouvrir_le_cours_d_un_autre_enseignant(
+    client: TestClient, jeu: dict[str, int], headers_b: dict[str, str]
+) -> None:
+    verifier_erreur(client.get(f"/api/cours/{jeu['bdd']}", headers=headers_b), 403, "ACCES_REFUSE")
+
+
+def test_t18_ouvrir_sans_jeton(client: TestClient, jeu: dict[str, int]) -> None:
+    verifier_erreur(client.get(f"/api/cours/{jeu['bdd']}"), 401, "NON_AUTHENTIFIE")
+
+
+def test_t22_cours_inexistant(client: TestClient, headers_a: dict[str, str]) -> None:
+    verifier_erreur(client.get("/api/cours/999999", headers=headers_a), 404, "COURS_INTROUVABLE")

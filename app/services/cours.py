@@ -1,10 +1,14 @@
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from app.courses.pdf_storage import PdfStorage
 from app.courses.records import CourseRecord, VersionRecord
 from app.courses.repository import CourseRepository
 from app.database import transaction
 from app.exceptions import (
+    AccessDeniedError,
+    CourseNotFoundError,
     DatabaseUnavailableError,
     FileMissingError,
     FileTooLargeError,
@@ -12,10 +16,56 @@ from app.exceptions import (
     NotPdfError,
     TitleMissingError,
 )
-from app.schemas import CoursResume
+from app.schemas import CoursDetail, CoursResume, InsertionCours
 from app.services import pdf
 
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # limite encore « à définir » dans le cahier de recette
+
+
+@contextmanager
+def _base_disponible() -> Iterator[None]:
+    """Une erreur SQLite pendant une lecture devient un 503 BDD_INDISPONIBLE."""
+    try:
+        yield
+    except sqlite3.Error as erreur:
+        raise DatabaseUnavailableError() from erreur
+
+
+def _cours_de(
+    depot: CourseRepository, enseignant: str, id_cours: int
+) -> tuple[CourseRecord, VersionRecord]:
+    """Contrôles communs à QM-17 : le cours existe (404) et appartient à l'enseignant (403)."""
+    cours = depot.get_course(id_cours)
+    if cours is None:
+        raise CourseNotFoundError()
+    if cours.owner_ldap != enseignant:
+        raise AccessDeniedError()
+    version = depot.get_active_version(id_cours)
+    if version is None:
+        raise InternalStorageError("Aucune version active pour ce cours")
+    return cours, version
+
+
+def _detail(depot: CourseRepository, cours: CourseRecord, version: VersionRecord) -> CoursDetail:
+    return CoursDetail(
+        id_cours=cours.id,
+        titre=cours.title,
+        version=version.version_number,
+        id_version=version.id,
+        nb_pages=version.page_count,
+        insertions=[
+            InsertionCours(
+                id_insertion=insertion.id,
+                type=insertion.item_type,
+                id_quiz=insertion.item_id if insertion.item_type == "QUIZ" else None,
+                id_leaderboard=insertion.item_id if insertion.item_type == "LEADERBOARD" else None,
+                titre=insertion.title,
+                apres_page=insertion.after_page,
+                ordre=insertion.ordre,
+            )
+            for insertion in depot.list_insertions_for_version(version.id)
+        ],
+    )
 
 
 def controler_fichier(contenu: bytes | None, type_mime: str | None) -> list[str]:
@@ -67,7 +117,7 @@ def importer_cours(
 def lister_cours(connexion: sqlite3.Connection, proprietaire: str) -> list[CoursResume]:
     """Tableau de bord : cours de l'enseignant, version active et nombre de quiz."""
     depot = CourseRepository(connexion)
-    try:
+    with _base_disponible():
         return [
             CoursResume(
                 id_cours=cours.id,
@@ -79,5 +129,11 @@ def lister_cours(connexion: sqlite3.Connection, proprietaire: str) -> list[Cours
             for cours in depot.list_courses_for_owner(proprietaire)
             if (version := depot.get_active_version(cours.id)) is not None
         ]
-    except sqlite3.Error as erreur:
-        raise DatabaseUnavailableError() from erreur
+
+
+def consulter_cours(connexion: sqlite3.Connection, enseignant: str, id_cours: int) -> CoursDetail:
+    """Un cours de l'enseignant avec sa version courante et ses insertions."""
+    depot = CourseRepository(connexion)
+    with _base_disponible():
+        cours, version = _cours_de(depot, enseignant, id_cours)
+        return _detail(depot, cours, version)

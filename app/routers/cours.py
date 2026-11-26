@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, UploadFile
 
 from app.dependencies import InsertionsDbDep, PdfStorageDep, TeacherDep
-from app.schemas import CoursImporte, CoursResume
+from app.schemas import CoursDetail, CoursImporte, CoursResume
 from app.services import cours as service_cours
 
 router = APIRouter(prefix="/api/cours", tags=["cours"])
@@ -34,3 +34,9 @@ def importer_cours(
 def lister_cours(enseignant: TeacherDep, db: Db) -> list[CoursResume]:
     """Lister les cours de l'enseignant connecté (QM-17)."""
     return service_cours.lister_cours(db, enseignant)
+
+
+@router.get("/{id_cours}")
+def consulter_cours(id_cours: int, enseignant: TeacherDep, db: Db) -> CoursDetail:
+    """Ouvrir un cours : version courante, quiz et leaderboards insérés (QM-17)."""
+    return service_cours.consulter_cours(db, enseignant, id_cours)
