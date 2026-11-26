@@ -28,3 +28,4 @@ htmlcov/
 data/
 storage/
 *.db
+demo_pdfs/
