@@ -32,14 +32,5 @@ def importer_cours(
 
 @router.get("")
 def lister_cours(enseignant: TeacherDep, db: Db) -> list[CoursResume]:
-    """Lister les cours de l'enseignant connecté."""
-    return [
-        CoursResume(
-            id_cours=cours.id,
-            titre=cours.title,
-            version=version.version_number,
-            nb_pages=version.page_count,
-            nb_quiz=0,
-        )
-        for cours, version in service_cours.lister_cours(db, enseignant)
-    ]
+    """Lister les cours de l'enseignant connecté (QM-17)."""
+    return service_cours.lister_cours(db, enseignant)

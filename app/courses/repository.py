@@ -69,6 +69,13 @@ class CourseRepository:
         ).fetchall()
         return [_row_to_course(row) for row in rows]
 
+    def count_quizzes(self, course_id: int) -> int:
+        """Number of quizzes attached to a course."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total FROM quizzes WHERE course_id = ?", (course_id,)
+        ).fetchone()
+        return int(row["total"])
+
     def get_active_version(self, course_id: int) -> VersionRecord | None:
         """Fetch the active version of a course."""
         row = self._conn.execute(

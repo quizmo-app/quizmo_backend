@@ -12,6 +12,7 @@ from app.exceptions import (
     NotPdfError,
     TitleMissingError,
 )
+from app.schemas import CoursResume
 from app.services import pdf
 
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # limite encore « à définir » dans le cahier de recette
@@ -63,14 +64,18 @@ def importer_cours(
     return cours, version
 
 
-def lister_cours(
-    connexion: sqlite3.Connection, proprietaire: str
-) -> list[tuple[CourseRecord, VersionRecord]]:
-    """Cours de l'enseignant avec leur version active."""
+def lister_cours(connexion: sqlite3.Connection, proprietaire: str) -> list[CoursResume]:
+    """Tableau de bord : cours de l'enseignant, version active et nombre de quiz."""
     depot = CourseRepository(connexion)
     try:
         return [
-            (cours, version)
+            CoursResume(
+                id_cours=cours.id,
+                titre=cours.title,
+                version=version.version_number,
+                nb_pages=version.page_count,
+                nb_quiz=depot.count_quizzes(cours.id),
+            )
             for cours in depot.list_courses_for_owner(proprietaire)
             if (version := depot.get_active_version(cours.id)) is not None
         ]
